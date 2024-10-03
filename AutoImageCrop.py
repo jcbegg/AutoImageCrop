@@ -26,24 +26,22 @@ def detect_head(image):
     
     h, w, _ = image.shape
     
-    # Get specific landmark coordinates for forehead, chin, eyes, ears, and nose
-    forehead_y = int(landmarks.landmark[10].y * h)  # Top of forehead
-    chin_y = int(landmarks.landmark[152].y * h)     # Bottom of chin
-    left_eye_y = int(landmarks.landmark[33].y * h)  # Left eye y-coordinate
-    left_ear_x = int(landmarks.landmark[234].x * w)  # Left ear x-coordinate
-    right_ear_x = int(landmarks.landmark[454].x * w)  # Right ear x-coordinate
-    nose_x = int(landmarks.landmark[1].x * w)         # Nose x-coordinate
-    nose_y = int(landmarks.landmark[1].y * h)  # Nose y-coordinate
+    forehead_y = int(landmarks.landmark[10].y * h)
+    forehead_x = int(landmarks.landmark[10].x * w)
+    chin_y = int(landmarks.landmark[152].y * h)
+    left_eye_y = int(landmarks.landmark[33].y * h)
+    left_ear_x = int(landmarks.landmark[234].x * w)
+    right_ear_x = int(landmarks.landmark[454].x * w)
+    nose_x = int(landmarks.landmark[1].x * w)
+    nose_y = int(landmarks.landmark[1].y * h)
 
-    # Initialize y_min at the nose position
     y_min = nose_y
 
-    # Check pixels going upward from the nose position
     found_white_pixel = False
-    for y in range(nose_y, -1, -1):  # Start checking from the nose position and move upwards
-        pixel_color = image[y, nose_x]
+    for y in range(forehead_y, -1, -1):
+        pixel_color = image[y, forehead_x]
         
-        if all(c >= 250 for c in pixel_color):  # RGB values close to white
+        if all(c >= 250 for c in pixel_color):
             y_min = y  
             found_white_pixel = True
             break
@@ -86,7 +84,7 @@ def process_image(image, draw_rectangle):
     
     x, y, w, h = head
     
-    if draw_rectangle:  # Check if the rectangle should be drawn
+    if draw_rectangle:
         cv2.rectangle(image, (x, y), (x + w, y + h), (255, 0, 255), 3)
 
     square_size = max(w, h)
@@ -126,11 +124,11 @@ def process_zip(zip_file, draw_rectangle):
     
     input_zip = zipfile.ZipFile(zip_file, 'r')
     
-    output_zip_buffer = io.BytesIO()
-    
-    output_zip = zipfile.ZipFile(output_zip_buffer, 'w', zipfile.ZIP_DEFLATED)
-    
-    preview_images = []
+    # Create a directory to save processed images
+    output_dir_path = os.path.join(os.getcwd(), "processed_images")
+    os.makedirs(output_dir_path, exist_ok=True)
+
+    preview_images_paths = []
     
     for filename in input_zip.namelist():
         if filename.lower().endswith(('.png', '.jpg', '.jpeg')):
@@ -143,43 +141,64 @@ def process_zip(zip_file, draw_rectangle):
                 processed_img = process_image(img, draw_rectangle)
 
                 if processed_img is not None:
-                    img_byte_arr = io.BytesIO()
-                    processed_img.save(img_byte_arr, format='PNG')
-                    img_byte_arr.seek(0)
+                    output_image_path = os.path.join(output_dir_path, f'processed_{filename}')
+                    processed_img.save(output_image_path)  # Save to local folder
+                    preview_images_paths.append(output_image_path)
 
-                    output_zip.writestr(f'processed_{filename}', img_byte_arr.getvalue())
-                    preview_images.append(processed_img)
+                    print(f"Saved processed image to {output_image_path}")
 
-    output_zip.close()
-    
-    output_zip_buffer.seek(0)
-    
     print("ZIP file processed.")
     
-    return output_zip_buffer, preview_images
+    return output_dir_path
+
+def cleanup_processed_files(output_dir):
+    if os.path.exists(output_dir):
+        for file in os.listdir(output_dir):
+            file_path = os.path.join(output_dir, file)
+            try:
+                if os.path.isfile(file_path):
+                    os.remove(file_path)  # Remove individual files
+                elif os.path.isdir(file_path):
+                    shutil.rmtree(file_path)  # Remove directories
+            except Exception as e:
+                print(f"Error deleting file {file_path}: {e}")
+
+    # Also remove any existing ZIP files
+    zip_file_path = os.path.join(os.getcwd(), "cropped_headshots.zip")
+    if os.path.exists(zip_file_path):
+        try:
+            os.remove(zip_file_path)
+        except Exception as e:
+            print(f"Error deleting ZIP file {zip_file_path}: {e}")
 
 def gradio_interface(zip_file, draw_rectangle):
+    print("Cleaning up old processed files...")
+    
+    output_dir_path = os.path.join(os.getcwd(), "processed_images")
+    cleanup_processed_files(output_dir_path)  # Clean up old files
+
     print("Received ZIP file. Processing...")
     
-    output_zip, preview_images = process_zip(zip_file, draw_rectangle)
+    output_dir_path = process_zip(zip_file, draw_rectangle)
 
-    # Create a temporary file to save the ZIP content.
-    temp_file_path = tempfile.NamedTemporaryFile(delete=False).name
-   
-    with open(temp_file_path, 'wb') as f:
-       f.write(output_zip.getvalue())
-       
-    named_output_path = os.path.join(os.path.dirname(temp_file_path), "cropped_headshots.zip")
-    shutil.move(temp_file_path, named_output_path)
+    # Create a zip file of processed images for download
+    output_zip_path = os.path.join(os.getcwd(), "cropped_headshots.zip")
+    with zipfile.ZipFile(output_zip_path, 'w') as output_zip:
+        for root_dir, _, files in os.walk(output_dir_path):
+            for file in files:
+                output_zip.write(os.path.join(root_dir, file), arcname=file)
+
+    # Prepare preview image paths for the gallery
+    preview_images = [os.path.join(output_dir_path, f) for f in os.listdir(output_dir_path) if f.endswith(('.png', '.jpg', '.jpeg'))]
 
     print("Processing complete. Output file ready.")
-    return named_output_path, preview_images
+    return output_zip_path, preview_images
 
 iface = gr.Interface(
    fn=gradio_interface,
    inputs=[
        gr.File(label="Upload ZIP file of photos"),
-       gr.Checkbox(label="Check Headshot Region", value=True)  # Toggle to draw rectangle
+       gr.Checkbox(label="Check Headshot Region", value=True) 
    ],
    outputs=[
        gr.File(label="Download processed photos", file_count="single", file_types=[".zip"]),
