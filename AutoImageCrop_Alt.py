@@ -67,7 +67,7 @@ def detect_head(image):
     
     return (x_min, y_min, x_max - x_min, y_max - y_min)
 
-def process_image(image):
+def process_image(image, draw_rectangle):
     print("Processing image...")
     
     head = detect_head(image)
@@ -78,8 +78,8 @@ def process_image(image):
     
     x, y, w, h = head
     
-    # Draw a magenta rectangle around the detected head
-    cv2.rectangle(image, (x, y), (x + w, y + h), (255, 0, 255), 3)  # Magenta color in BGR format
+    if draw_rectangle:  # Check if the rectangle should be drawn
+        cv2.rectangle(image, (x, y), (x + w, y + h), (255, 0, 255), 3)  # Magenta color in BGR format
 
     square_size = max(w, h)
     
@@ -113,7 +113,7 @@ def process_image(image):
     
     return cropped_image
 
-def process_zip(zip_file):
+def process_zip(zip_file, draw_rectangle):
     print("Processing ZIP file...")
     
     input_zip = zipfile.ZipFile(zip_file, 'r')
@@ -132,7 +132,7 @@ def process_zip(zip_file):
                 img_array = np.frombuffer(img_data, np.uint8)
                 img = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
 
-                processed_img = process_image(img)
+                processed_img = process_image(img, draw_rectangle)
 
                 if processed_img is not None:
                     img_byte_arr = io.BytesIO()
@@ -150,14 +150,14 @@ def process_zip(zip_file):
     
     return output_zip_buffer, preview_images
 
-def gradio_interface(zip_file):
+def gradio_interface(zip_file, draw_rectangle):
     print("Received ZIP file. Processing...")
     
-    output_zip, preview_images = process_zip(zip_file)
+    output_zip, preview_images = process_zip(zip_file, draw_rectangle)
 
     # Create a temporary file to save the ZIP content.
     temp_file_path = tempfile.NamedTemporaryFile(delete=False).name
-    
+   
     with open(temp_file_path, 'wb') as f:
        f.write(output_zip.getvalue())
        
@@ -169,12 +169,15 @@ def gradio_interface(zip_file):
 
 iface = gr.Interface(
    fn=gradio_interface,
-   inputs=gr.File(label="Upload ZIP file of photos"),
+   inputs=[
+       gr.File(label="Upload ZIP file of photos"),
+       gr.Checkbox(label="Check Headshot Region", value=True)  # Toggle to draw rectangle
+   ],
    outputs=[
        gr.File(label="Download processed photos", file_count="single", file_types=[".zip"]),
        gr.Gallery(label="Preview of processed photos")
    ],
-   title="Headshot Cropping Tool",
+   title="ALT Headshot Cropping Tool",
    description="Upload a ZIP file containing photos. The tool will crop each photo to focus on the head.",
    allow_flagging="never"
 )
